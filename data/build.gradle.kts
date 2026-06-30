@@ -2,12 +2,17 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
 }
 
 android {
     namespace = "com.gis.systrace.data"
     compileSdk = 36
+
+    buildFeatures {
+        aidl = true
+    }
 
     defaultConfig {
         minSdk = 24
@@ -26,9 +31,14 @@ android {
 dependencies {
     implementation(project(":core:common"))
     implementation(project(":core:domain"))
-    implementation(libs.kotlinx.coroutines.core)
+    implementation(project(":core:network"))
+
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
-    implementation(libs.androidx.room.runtime)
-    implementation(libs.androidx.room.ktx)
-    ksp(libs.androidx.room.compiler)
+    implementation(libs.com.google.dagger.hilt.android)
+
+    ksp(libs.com.google.dagger.hilt.compiler)
+
+    testImplementation(libs.junit)
 }

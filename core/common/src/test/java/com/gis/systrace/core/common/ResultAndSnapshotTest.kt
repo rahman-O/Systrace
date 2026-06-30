@@ -24,42 +24,20 @@ class ResultAndSnapshotTest {
             buildNumber = "UP1A.231005.007",
             kernelVersion = "6.1.0",
             systemProperties = mapOf("ro.debuggable" to "0"),
-            totalRamBytes = 1,
-            availableRamBytes = 2,
-            internalStorageBytes = 3,
-            externalStorageBytes = 4,
-            freeStorageBytes = 5,
-            batteryPercentage = 80,
-            chargingState = "Charging",
-            batteryHealth = "Good",
-            batteryTemperatureCelsius = 32.5f,
-            batteryVoltageMillivolts = 4100,
-            batteryTechnology = "Li-ion",
+            totalRamBytes = 8_000_000_000,
+            internalStorageBytes = 128_000_000_000,
             displayWidthPixels = 1080,
             displayHeightPixels = 2400,
             densityDpi = 420,
             refreshRateHz = 120f,
             screenSizeInches = 6.4f,
-            networkType = "WIFI",
-            ipAddresses = listOf("192.168.1.10"),
-            dnsServers = listOf("8.8.8.8"),
-            vpnDetected = false,
-            connectionStatus = "Connected",
             hasTelephonyData = false,
-            availableSensors = emptyList(),
-            installedApplications = emptyList(),
-            systemApplications = emptyList(),
-            rootDetected = false,
-            emulatorDetected = true,
-            developerOptionsEnabled = false,
-            usbDebuggingEnabled = false,
-            deviceOwnerStatus = "None",
             collectedAtEpochMillis = 123L,
         )
 
         assertEquals("Google", snapshot.deviceManufacturer)
         assertEquals(34, snapshot.sdkVersion)
-        assertTrue(snapshot.ipAddresses.contains("192.168.1.10"))
+        assertTrue(snapshot.totalRamBytes > 0)
     }
 
     @Test

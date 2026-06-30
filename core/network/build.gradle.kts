@@ -23,8 +23,8 @@ android {
 }
 
 dependencies {
-    implementation(project(":core:common"))
-    implementation(libs.retrofit)
-    implementation(libs.okhttp)
+    implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.okhttp)
+    testImplementation(libs.junit)
 }

@@ -33,21 +33,10 @@ data class DeviceSnapshot(
     val supported32BitAbis: List<String> = emptyList(),
     val supported64BitAbis: List<String> = emptyList(),
 
-    // Memory & Storage
+    // Memory & Storage (totals only)
     val totalRamBytes: Long,
-    val availableRamBytes: Long,
     val internalStorageBytes: Long,
     val externalStorageBytes: Long? = null,
-    val freeStorageBytes: Long,
-
-    // Battery
-    val batteryPercentage: Int,
-    val chargingState: String,
-    val batteryHealth: String,
-    val batteryTemperatureCelsius: Float,
-    val batteryVoltageMillivolts: Int,
-    val batteryTechnology: String,
-    val batteryCycleCount: Int? = null,
 
     // Display
     val displayWidthPixels: Int,
@@ -55,19 +44,6 @@ data class DeviceSnapshot(
     val densityDpi: Int,
     val refreshRateHz: Float,
     val screenSizeInches: Float,
-
-    // Network
-    val wifiSsid: String? = null,
-    val wifiBssid: String? = null,
-    val networkType: String,
-    val ipAddresses: List<String>,
-    val dnsServers: List<String>,
-    val vpnDetected: Boolean,
-    val connectionStatus: String,
-    val isScreenLocked: Boolean = false,
-    val isInternetConnected: Boolean = true,
-    val onlineStatus: String = "UNKNOWN",
-    val offlineReason: String? = null,
 
     // Telephony
     val simOperatorName: String? = null,
@@ -78,7 +54,7 @@ data class DeviceSnapshot(
     val hasTelephonyData: Boolean,
     val simSlots: List<SimSlotDetail> = emptyList(),
 
-    // Device identity (MDM)
+    // Device identity
     val serialNumber: String? = null,
     val androidId: String? = null,
     val imeiPrimary: String? = null,
@@ -98,35 +74,15 @@ data class DeviceSnapshot(
     val baseOs: String? = null,
     val previewSdkInt: Int? = null,
 
-    // Capabilities
-    val availableSensors: List<SensorDetail>,
-    val installedApplications: List<AppDetail>,
-    val systemApplications: List<AppDetail>,
-
-    // Security & MDM
-    val rootDetected: Boolean,
-    val emulatorDetected: Boolean,
-    val developerOptionsEnabled: Boolean,
-    val usbDebuggingEnabled: Boolean,
-    val deviceOwnerStatus: String,
-    val widevineLevel: String? = null,
-    val isDeviceOwner: Boolean = false,
-    val isProfileOwner: Boolean = false,
-    val deviceOwnerComponent: String? = null,
-    val organizationName: String? = null,
-    val isEncrypted: Boolean? = null,
-    val encryptionStatus: String? = null,
-    val screenLockType: String? = null,
-    val isOemUnlocked: Boolean? = null,
-    val googlePlayServicesVersion: String? = null,
-    val isWorkProfile: Boolean = false,
-
-    // System info
-    val bluetoothName: String? = null,
-    val bluetoothEnabled: Boolean? = null,
-    val uptimeMillis: Long? = null,
-    val timezone: String? = null,
-    val locale: String? = null,
+    // About phone (Settings-aligned)
+    val androidVersionDisplay: String? = null,
+    val googlePlaySystemUpdate: String? = null,
+    val basebandVersion: String? = null,
+    val simStatusSummary: String? = null,
+    val socModel: String? = null,
+    val socManufacturer: String? = null,
+    val sku: String? = null,
+    val buildCodename: String? = null,
 
     // Location
     val lastKnownLatitude: Double? = null,
@@ -135,23 +91,42 @@ data class DeviceSnapshot(
     val locationAccuracyMeters: Float? = null,
     val locationTimestampEpochMillis: Long? = null,
 
+    // Runtime / dynamic (aligned with snapshot_mapper.go)
+    val availableRamBytes: Long? = null,
+    val freeStorageBytes: Long? = null,
+    val batteryPercentage: Int? = null,
+    val batteryHealth: String? = null,
+    val chargingState: String? = null,
+    val batteryTechnology: String? = null,
+    val batteryTemperatureCelsius: Float? = null,
+    val batteryVoltageMillivolts: Int? = null,
+    val networkType: String? = null,
+    val wifiSsid: String? = null,
+    val wifiBssid: String? = null,
+    val wifiRssiDbm: Int? = null,
+    val simSignalDbm: Int? = null,
+    val connectionStatus: String? = null,
+    val ipAddresses: List<String> = emptyList(),
+    val onlineStatus: String = "UNKNOWN",
+    val isScreenLocked: Boolean = false,
+    val screenOn: Boolean? = null,
+    val screenBrightness: Int? = null,
+    val screenOrientation: String? = null,
+    val isInternetConnected: Boolean = false,
+    val offlineReason: String? = null,
+    val bluetoothEnabled: Boolean = false,
+    val vpnDetected: Boolean = false,
+    val uptimeMillis: Long? = null,
+
+    val availableSensors: List<SensorDetail> = emptyList(),
+
     val collectedAtEpochMillis: Long,
 ) {
     @Serializable
     data class SensorDetail(
-        val name: String,
-        val vendor: String,
-        val version: Int,
-        val powerMw: Float,
-        val type: Int,
-    )
-
-    @Serializable
-    data class AppDetail(
-        val packageName: String,
-        val versionName: String? = null,
-        val versionCode: Long? = null,
-        val grantedPermissions: List<String> = emptyList(),
+        val name: String = "",
+        val type: String = "",
+        val vendor: String = "",
     )
 
     @Serializable

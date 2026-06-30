@@ -18,6 +18,10 @@ import com.gis.systrace.core.common.AndroidConsoleLogger
 import com.gis.systrace.core.common.CollectOptions
 import com.gis.systrace.core.common.DeviceCollectorShared
 import com.gis.systrace.data.SnapshotRepository
+import com.gis.systrace.service.backend.BackendSyncEntryPoint
+import com.gis.systrace.service.backend.MdmObserverEntryPoint
+import com.gis.systrace.service.network.NetworkConnectivityObserver
+import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -37,11 +41,16 @@ class DeviceCollectorForegroundService : Service() {
         const val CHANNEL_ID = "device_collector_channel_v3"
         const val NOTIF_ID = 1001
         private const val TAG = "DeviceCollectorFS"
-        private const val COLLECTION_INTERVAL_MS = 60_000L
+        private const val COLLECTION_INTERVAL_MS = 30_000L
 
         private val BACKGROUND_COLLECT_OPTIONS = CollectOptions(
             includeInstalledApps = false,
             includeSensors = false,
+        )
+
+        private val INITIAL_COLLECT_OPTIONS = CollectOptions(
+            includeInstalledApps = true,
+            includeSensors = true,
         )
 
         @Volatile
@@ -52,6 +61,8 @@ class DeviceCollectorForegroundService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var collectionJob: Job? = null
     private lateinit var repository: SnapshotRepository
+    private var networkObserver: NetworkConnectivityObserver? = null
+    private var monitoringStarted = false
     private val mainHandler = Handler(Looper.getMainLooper())
     private val syncCounter = AtomicInteger(0)
 
@@ -67,26 +78,30 @@ class DeviceCollectorForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         isRunning = true
-        repository = SnapshotRepository(applicationContext)
+        repository = EntryPointAccessors.fromApplication(
+            applicationContext,
+            SnapshotRepositoryEntryPoint::class.java,
+        ).snapshotRepository()
+        startBackendMonitoring()
+        startNetworkObserver()
         createNotificationChannel()
         postNotificationUpdate()
 
         collectionJob = serviceScope.launch {
+            collectAndPersist(INITIAL_COLLECT_OPTIONS)
             while (isActive) {
                 val cycleStart = SystemClock.elapsedRealtime()
-                collectAndPersist()
+                collectAndPersist(BACKGROUND_COLLECT_OPTIONS)
                 val elapsed = SystemClock.elapsedRealtime() - cycleStart
                 val waitMs = (COLLECTION_INTERVAL_MS - elapsed).coerceAtLeast(1_000L)
-                AndroidConsoleLogger.d(TAG, "Next cycle in ${waitMs}ms (last collect took ${elapsed}ms)")
                 delay(waitMs)
             }
         }
 
-        AndroidConsoleLogger.d(TAG, "Service created and collection loop started (interval=${COLLECTION_INTERVAL_MS}ms)")
+        AndroidConsoleLogger.d(TAG, "Service created (interval=${COLLECTION_INTERVAL_MS}ms)")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        AndroidConsoleLogger.d(TAG, "onStartCommand called")
         postNotificationUpdate()
         return START_STICKY
     }
@@ -100,40 +115,88 @@ class DeviceCollectorForegroundService : Service() {
 
     override fun onDestroy() {
         isRunning = false
+        networkObserver?.unregister()
+        networkObserver = null
         collectionJob?.cancel()
         serviceScope.cancel()
-        AndroidConsoleLogger.d(TAG, "onDestroy")
+        try {
+            EntryPointAccessors.fromApplication(
+                applicationContext,
+                BackendSyncEntryPoint::class.java,
+            ).backendSyncService().stop()
+        } catch (_: Throwable) {
+        }
         super.onDestroy()
     }
 
-    private suspend fun collectAndPersist() {
+    private fun startBackendMonitoring() {
+        if (monitoringStarted) return
+        monitoringStarted = true
+        try {
+            val backendEntry = EntryPointAccessors.fromApplication(
+                applicationContext,
+                BackendSyncEntryPoint::class.java,
+            )
+            EntryPointAccessors.fromApplication(
+                applicationContext,
+                MdmObserverEntryPoint::class.java,
+            ).mdmSettingsObserver().start(serviceScope)
+            backendEntry.backendSyncService().start(serviceScope)
+        } catch (t: Throwable) {
+            AndroidConsoleLogger.e(TAG, "Failed to start backend monitoring", t)
+        }
+    }
+
+    private fun startNetworkObserver() {
+        if (networkObserver != null) return
+        val backendSync = try {
+            EntryPointAccessors.fromApplication(
+                applicationContext,
+                BackendSyncEntryPoint::class.java,
+            ).backendSyncService()
+        } catch (_: Throwable) {
+            null
+        }
+        networkObserver = NetworkConnectivityObserver(applicationContext) { hasInternet ->
+            serviceScope.launch {
+                collectAndPersist(BACKGROUND_COLLECT_OPTIONS)
+                backendSync?.onConnectivityChanged(hasInternet)
+            }
+        }.also { it.register() }
+    }
+
+    private suspend fun collectAndPersist(options: CollectOptions = BACKGROUND_COLLECT_OPTIONS) {
         val cycle = syncCounter.incrementAndGet()
         isCollecting = true
         postNotificationUpdate()
-        AndroidConsoleLogger.d(TAG, "Collection cycle #$cycle started")
 
-        val startedAt = System.currentTimeMillis()
         try {
             val snapshot = withContext(Dispatchers.Default) {
-                DeviceCollectorShared.collect(applicationContext, BACKGROUND_COLLECT_OPTIONS)
+                DeviceCollectorShared.collect(applicationContext, options)
             }
             repository.saveSnapshot(snapshot)
 
+            try {
+                val backendEntry = EntryPointAccessors.fromApplication(
+                    applicationContext,
+                    BackendSyncEntryPoint::class.java,
+                )
+                val metricEvents = backendEntry.metricChangeTracker().detectChanges(snapshot)
+                if (metricEvents.isNotEmpty()) {
+                    backendEntry.backendSyncService().scheduleMetricEventBatch(metricEvents)
+                }
+                backendEntry.backendSyncService().scheduleUploadAfterSnapshot()
+            } catch (t: Throwable) {
+                AndroidConsoleLogger.e(TAG, "Failed to schedule post-snapshot upload", t)
+            }
+
             lastSyncEpochMs = System.currentTimeMillis()
-            lastSyncLabel = formatSyncLabel(lastSyncEpochMs)
+            lastSyncLabel = "Last sync: ${formatTimeOnly(lastSyncEpochMs)}"
             lastOnlineStatus = snapshot.onlineStatus
             isCollecting = false
 
             SnapshotLogFormatter.logSummary(snapshot, lastSyncLabel)
-            AndroidConsoleLogger.d(
-                TAG,
-                "Presence=${snapshot.onlineStatus} locked=${snapshot.isScreenLocked} internet=${snapshot.isInternetConnected} reason=${snapshot.offlineReason ?: "none"}",
-            )
             postNotificationUpdate()
-            AndroidConsoleLogger.d(
-                TAG,
-                "Collection cycle #$cycle completed in ${System.currentTimeMillis() - startedAt}ms: $lastSyncLabel",
-            )
         } catch (t: Throwable) {
             isCollecting = false
             lastSyncLabel = "Sync failed ${formatTimeOnly(System.currentTimeMillis())}"
@@ -159,10 +222,6 @@ class DeviceCollectorForegroundService : Service() {
         }
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.notify(NOTIF_ID, notification)
-        AndroidConsoleLogger.d(
-            TAG,
-            "Notification applied on main thread: $lastSyncLabel (collecting=$isCollecting, cycle=${syncCounter.get()})",
-        )
     }
 
     private fun buildNotification(): Notification {
@@ -174,51 +233,32 @@ class DeviceCollectorForegroundService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-        val statusLine = if (isCollecting) {
-            "Collecting now..."
-        } else {
-            lastSyncLabel
-        }
+        val statusLine = if (isCollecting) "Collecting now..." else lastSyncLabel
         val timeText = formatTimeOnly(lastSyncEpochMs)
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("SysTrace • $timeText")
             .setContentText(statusLine)
             .setSubText("$lastOnlineStatus • Cycle #${syncCounter.get()}")
-            .setStyle(
-                NotificationCompat.BigTextStyle()
-                    .bigText("$statusLine\nPresence: $lastOnlineStatus\nNext run every 60 seconds"),
-            )
             .setSmallIcon(android.R.drawable.ic_menu_info_details)
             .setContentIntent(pending)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setShowWhen(true)
             .setWhen(lastSyncEpochMs)
-            .setSortKey(lastSyncEpochMs.toString())
-            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.deleteNotificationChannel("device_collector_channel")
-            nm.deleteNotificationChannel("device_collector_channel_v2")
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Device Collector",
                 NotificationManager.IMPORTANCE_DEFAULT,
-            ).apply {
-                description = "SysTrace background device snapshot collection"
-                setShowBadge(false)
-            }
+            )
             nm.createNotificationChannel(channel)
         }
-    }
-
-    private fun formatSyncLabel(epochMs: Long): String {
-        return "Last sync: ${formatTimeOnly(epochMs)}"
     }
 
     private fun formatTimeOnly(epochMs: Long): String {
