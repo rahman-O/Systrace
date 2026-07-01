@@ -43,6 +43,30 @@ class HeadwindMdmClient @Inject constructor(
         }
     }
 
+    /** Launcher config bundle (device number, server URL, etc.). */
+    fun queryConfigValue(key: String): String? {
+        if (!ensureConnected(CONNECT_TIMEOUT_MS)) {
+            return null
+        }
+        return try {
+            val bundle = mdmApi?.queryConfig() ?: return null
+            bundle.getString(key)?.trim()?.takeIf { it.isNotEmpty() }
+        } catch (t: Throwable) {
+            Log.w(TAG, "queryConfigValue($key) failed: ${t.message}")
+            null
+        }
+    }
+
+    fun resolveDeviceNumber(): String? {
+        return listOf("deviceId", "deviceNumber", "DEVICE_NUMBER", "number")
+            .firstNotNullOfOrNull { queryConfigValue(it) }
+    }
+
+    fun resolveServerBaseUrl(): String? {
+        return listOf("baseUrl", "BASE_URL", "serverUrl", "configBaseUrl")
+            .firstNotNullOfOrNull { queryConfigValue(it) }
+    }
+
     fun ensureConnected(timeoutMs: Long = CONNECT_TIMEOUT_MS): Boolean {
         if (mdmApi != null) {
             return true
@@ -102,6 +126,22 @@ class HeadwindMdmClient @Inject constructor(
             Thread.sleep(50)
         }
         return mdmApi != null
+    }
+
+    /** Ask the launcher to re-fetch configuration from the MDM server (HTTP sync). */
+    fun forceConfigUpdate(): Boolean {
+        if (!ensureConnected(CONNECT_TIMEOUT_MS)) {
+            return false
+        }
+        return try {
+            mdmApi?.forceConfigUpdate()
+            Log.d(TAG, "Requested launcher forceConfigUpdate")
+            true
+        } catch (t: Throwable) {
+            Log.w(TAG, "forceConfigUpdate failed: ${t.message}")
+            disconnect()
+            false
+        }
     }
 
     fun disconnect() {

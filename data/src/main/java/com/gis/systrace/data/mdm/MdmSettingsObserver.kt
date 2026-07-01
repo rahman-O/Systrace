@@ -17,6 +17,7 @@ class MdmSettingsObserver @Inject constructor(
     private val headwindMdmClient: HeadwindMdmClient,
 ) {
     private var started = false
+    private var lastForceConfigUpdateMs = 0L
 
     fun start(scope: CoroutineScope) {
         if (started) return
@@ -39,8 +40,21 @@ class MdmSettingsObserver @Inject constructor(
     }
 
     suspend fun refreshAndSyncIfNeeded() {
-        val changed = configRepository.applyMdmSettingsIfAvailable()
-        val config = configRepository.getConfig()
+        var changed = configRepository.applyMdmSettingsIfAvailable()
+        var config = configRepository.getConfig()
+        if (!config.isConfigured) {
+            val now = System.currentTimeMillis()
+            if (now - lastForceConfigUpdateMs >= FORCE_CONFIG_COOLDOWN_MS) {
+                lastForceConfigUpdateMs = now
+                if (headwindMdmClient.forceConfigUpdate()) {
+                    delay(LAUNCHER_SYNC_SETTLE_MS)
+                    if (configRepository.applyMdmSettingsIfAvailable()) {
+                        changed = true
+                    }
+                    config = configRepository.getConfig()
+                }
+            }
+        }
         if ((changed || config.isConfigured) && config.isConfigured) {
             val result = runBackendSync()
             if (result.isSuccess) {
@@ -57,5 +71,8 @@ class MdmSettingsObserver @Inject constructor(
         private const val WAITING_FOR_MDM_POLL_MS = 15_000L
         /** After configured, re-check MDM settings periodically. */
         private const val CONFIGURED_POLL_MS = 60_000L
+        /** Avoid hammering launcher when MQTT push is down but HTTP sync is available. */
+        private const val FORCE_CONFIG_COOLDOWN_MS = 60_000L
+        private const val LAUNCHER_SYNC_SETTLE_MS = 3_000L
     }
 }

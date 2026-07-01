@@ -15,6 +15,7 @@ import javax.inject.Singleton
 class MdmSettingsReader @Inject constructor(
     @ApplicationContext private val context: Context,
     private val headwindMdmClient: HeadwindMdmClient,
+    private val syncSettingsFetcher: MdmSyncSettingsFetcher,
 ) {
 
     data class SysTraceMdmConfig(
@@ -27,7 +28,8 @@ class MdmSettingsReader @Inject constructor(
 
     fun read(): SysTraceMdmConfig? {
         readFromHeadwind()?.let { return it }
-        return readFromLauncherPrefs()
+        readFromLauncherPrefs()?.let { return it }
+        return syncSettingsFetcher.fetch()
     }
 
     private fun readFromHeadwind(): SysTraceMdmConfig? {
